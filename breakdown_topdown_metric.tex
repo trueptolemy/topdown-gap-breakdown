@@ -1,0 +1,406 @@
+% Break Down Performance Gap into Topdown Metric
+% Build with XeLaTeX (or LuaLaTeX), twice:   xelatex breakdown_topdown_metric.tex
+\documentclass[12pt]{article}
+\usepackage[letterpaper,margin=1in,footskip=0.5in]{geometry}
+\usepackage{fontspec}
+\usepackage{amsmath}
+\usepackage{unicode-math}
+\usepackage[table]{xcolor}
+\usepackage{array}
+\usepackage{longtable}
+\usepackage{fancyhdr}
+
+% ---- fonts: Word uses Aptos (body), Calibri (tables), Cambria Math (equations).
+% Fallbacks: Carlito (metric-compatible with Calibri; system package or TeX Live),
+% then Latin Modern Sans; STIX Two Math, then Latin Modern Math.
+\defaultfontfeatures[\rmfamily,\sffamily]{}
+\newcommand\carlitofile[1]{#1{Carlito}[Extension=.ttf, UprightFont=*-Regular, BoldFont=*-Bold,
+                                       ItalicFont=*-Italic, BoldItalicFont=*-BoldItalic]}
+\IfFontExistsTF{Aptos}{\setmainfont{Aptos}}{%
+  \IfFontExistsTF{Carlito}{\setmainfont{Carlito}}{%
+    \IfFontExistsTF{Carlito-Regular.ttf}{\carlitofile\setmainfont}{%
+      \setmainfont{lmsans10}[Extension=.otf, UprightFont=*-regular, BoldFont=*-bold,
+                             ItalicFont=*-oblique, BoldItalicFont=*-boldoblique]}}}
+\IfFontExistsTF{Calibri}{\newfontfamily\tablefont{Calibri}}{%
+  \IfFontExistsTF{Carlito}{\newfontfamily\tablefont{Carlito}}{%
+    \IfFontExistsTF{Carlito-Regular.ttf}{\carlitofile{\newfontfamily\tablefont}}{%
+      \newcommand\tablefont{\normalfont}}}}
+\IfFontExistsTF{Cambria Math}{\setmathfont{Cambria Math}}{%
+  \IfFontExistsTF{STIX Two Math}{\setmathfont{STIX Two Math}}{%
+    \IfFontExistsTF{STIXTwoMath-Regular.otf}{\setmathfont{STIXTwoMath-Regular.otf}}{%
+      \setmathfont{latinmodern-math.otf}}}}
+
+% ---- colors used in the Word document
+\definecolor{tmaOrange}{HTML}{F8CBAD}
+\definecolor{tmaGray}{HTML}{D9D9D9}
+
+% ---- Word paragraph model: 12pt, line spacing 1.16, 8pt after, no indent
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{8pt}
+\setlength{\arrayrulewidth}{0.5pt}
+\renewcommand{\arraystretch}{1}
+% Word paragraphs here are left-aligned (no jc): ragged right, no hyphenation, like Word
+\AtBeginDocument{\fontsize{12pt}{16.95pt}\selectfont\raggedright}
+\newcommand{\npar}[1]{#1\par}
+\newcommand{\ipar}[2]{{\leftskip=#1\relax #2\par}}
+\newcommand{\cpar}[1]{{\centering #1\par}}
+\newcommand{\dmath}[1]{{\centering $\displaystyle #1$\par}}
+\newcommand{\emptypar}{\mbox{}\par}
+\newcommand{\numpara}[4]{{\hangindent=#1\relax\hangafter=1\relax
+  \noindent\hspace*{\dimexpr#1-#2\relax}\makebox[#2][l]{#3}#4\par}}
+% text box of perf output: 0.5pt black border, white fill, 0.1in/0.05in insets
+\newcommand{\perfbox}[3]{\setlength{\fboxsep}{0pt}\setlength{\fboxrule}{0.5pt}%
+  \fcolorbox{black}{white}{\hspace{0.1in}\parbox[t][\dimexpr#2-0.1in\relax][t]{\dimexpr#1-0.2in\relax}{%
+    \vspace{0.05in}\itshape\fontsize{11pt}{13.42pt}\selectfont\setlength{\parskip}{0pt}%
+    \raggedright #3}\hspace{0.1in}}}
+
+% ---- footer: page number at the left (Word "Page Numbers (Bottom of Page)")
+\pagestyle{fancy}
+\fancyhf{}
+\renewcommand{\headrulewidth}{0pt}
+\fancyfoot[L]{\fontsize{12pt}{14pt}\selectfont\thepage}
+
+\begin{document}
+\cpar{{\fontsize{16pt}{22.6pt}\selectfont \textbf{Break Down Performance Gap into }}{\fontsize{16pt}{22.6pt}\selectfont \textbf{Topdown Metric}}}
+\cpar{\textbf{(based on SPEC CPU (throughput related) benchmark)}}
+\cpar{Zhao Liu, Wangyang Guo, Chao Peng, Dapeng Mi, Tianyou Li, Litrin Jiang}
+\emptypar
+\numpara{18.00pt}{18.00pt}{\textbf{1.}}{\textbf{Background \& Problem}}
+\npar{\hspace*{4\fontdimen2\font}When comparing the performance of virtual machine and bare-metal system, we often identify virtualization performance gaps by analyzing PMU events - for example, using tools like “emon” or “perf” to collect typical event counts (such as TLB miss or cache miss-related events) or to gather top-down metrics.}
+\npar{\hspace*{4\fontdimen2\font}However, comparing the PMU data of VM and BM microarchitectures side by side presents several issues:}
+\numpara{36.00pt}{18.00pt}{\textbf{a)}}{\textbf{It is difficult to accurately }\textbf{align}\textbf{ the timelines of PMU event data}\textbf{. }}
+\ipar{18.00pt}{\hspace*{4\fontdimen2\font}Benchmarking often requires collecting performance data over the entire cycle - that is, starting data collection before the workload begins and stopping it after the workload ends. Automated and manual tests can easily result in misaligned timelines, leading to errors in events that measure absolute values (such as events collecting the number of misses or counting cycles).}
+\numpara{36.00pt}{18.00pt}{\textbf{b)}}{\textbf{It is difficult to estimate the performance gap by simply adding absolute values linearly.}}
+\ipar{18.00pt}{\hspace*{4\fontdimen2\font}A common method for estimating the performance gap is to multiply the number of occurrences of an event by the number of cycles it consumes, in order to determine the event’s contribution to the performance gap.}
+\ipar{18.00pt}{\hspace*{4\fontdimen2\font}The idea is to convert the performance gap into a difference in cycles, assuming that this difference corresponds to stall cycles:}
+\dmath{\mathit{Stall\_Cycles}=\sum\limits{\mathit{Penalt}{\mathit{y}}_{\mathit{i}}*\mathit{MissEven}{\mathit{t}}_{\mathit{i}}}}
+\ipar{18.00pt}{\hspace*{4\fontdimen2\font}However, this method is not correct for Out-of-order CPU [1], and in practice, it is difficult to achieve true alignment of the data.}
+\numpara{36.00pt}{18.00pt}{\textbf{c)}}{\textbf{I}\textbf{t is not possible to directly compare top-down data across different environments.}\textbf{ }}
+\ipar{18.00pt}{\hspace*{4\fontdimen2\font}The topdown approach reflects proportions, so it does not require perfectly precise timeline alignment, thereby eliminating errors in absolute-value events (as long as the sampled windows represent the scored runs, which can be checked as in section 3.(5)).}
+\ipar{18.00pt}{\hspace*{4\fontdimen2\font}But precisely because top-down analysis reflects proportions, a direct comparison of top-down data cannot reveal the true performance gap.}
+\ipar{18.00pt}{\hspace*{4\fontdimen2\font}For example, the following is the topdown data (the top-level) of 520.omnetpp\_r:}
+\par\begingroup\tablefont\fontsize{8pt}{9.76pt}\selectfont\setlength{\tabcolsep}{3.61pt}\LTleft=0pt plus 1fill \LTright=0pt plus 1fill\setlength{\LTpre}{0pt}\setlength{\LTpost}{0pt}
+\begin{longtable}{|m{139.55pt}|m{40.35pt}|m{36.25pt}|m{36.25pt}|m{36.25pt}|m{42.10pt}|m{30.30pt}|m{44.65pt}|@{}m{0pt}@{}}
+\hline
+\raggedright\arraybackslash{} & \centering\arraybackslash{}bm & \centering\arraybackslash{}4k vm & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}ratio:\newline{}(4k vm-bm)/bm & \centering\arraybackslash{}normal vm & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}ratio:\newline{}(normal vm-bm)/bm & \centering\arraybackslash{}2m vm & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}ratio:\newline{}(2m vm-bm)/bm & \rule[-0.00pt]{0pt}{40.45pt} \\ \hline \endfirsthead
+\cellcolor[HTML]{F8CBAD}\raggedright\arraybackslash{}metric\_\allowbreak{}TMA\_\allowbreak{}Frontend\_\allowbreak{}Bound(\%) & \cellcolor[HTML]{F8CBAD}\centering\arraybackslash{}12.59 & \cellcolor[HTML]{F8CBAD}\centering\arraybackslash{}16.39 & \cellcolor[HTML]{F8CBAD}\centering\arraybackslash{}30.24\% & \cellcolor[HTML]{F8CBAD}\centering\arraybackslash{}16.30 & \cellcolor[HTML]{F8CBAD}\centering\arraybackslash{}29.53\% & \cellcolor[HTML]{F8CBAD}\centering\arraybackslash{}16.22 & \cellcolor[HTML]{F8CBAD}\centering\arraybackslash{}28.88\% & \rule[-0.00pt]{0pt}{14.40pt} \\ \hline
+\raggedright\arraybackslash{}metric\_\allowbreak{}TMA\_\allowbreak{}..Fetch\_\allowbreak{}Latency(\%) & \centering\arraybackslash{}8.24 & \centering\arraybackslash{}12.32 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}49.54\% & \centering\arraybackslash{}11.82 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}43.49\% & \centering\arraybackslash{}11.71 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}42.14\% & \rule[-0.00pt]{0pt}{14.40pt} \\ \hline
+\raggedright\arraybackslash{}metric\_\allowbreak{}TMA\_\allowbreak{}....ICache\_\allowbreak{}Misses(\%) & \centering\arraybackslash{}0.25 & \centering\arraybackslash{}2.40 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}856.70\% & \centering\arraybackslash{}2.59 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}933.95\% & \centering\arraybackslash{}2.36 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}843.36\% & \rule[-0.00pt]{0pt}{14.40pt} \\ \hline
+\raggedright\arraybackslash{}metric\_\allowbreak{}TMA\_\allowbreak{}....ITLB\_\allowbreak{}Misses(\%) & \centering\arraybackslash{}0.28 & \centering\arraybackslash{}1.92 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}589.89\% & \centering\arraybackslash{}1.10 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}294.82\% & \centering\arraybackslash{}1.12 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}301.07\% & \rule[-0.00pt]{0pt}{14.40pt} \\ \hline
+\raggedright\arraybackslash{}metric\_\allowbreak{}TMA\_\allowbreak{}....Branch\_\allowbreak{}Resteers(\%) & \centering\arraybackslash{}2.44 & \centering\arraybackslash{}4.71 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}93.28\% & \centering\arraybackslash{}4.51 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}84.89\% & \centering\arraybackslash{}4.35 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}78.36\% & \rule[-0.00pt]{0pt}{14.40pt} \\ \hline
+\raggedright\arraybackslash{}metric\_\allowbreak{}TMA\_\allowbreak{}....MS\_\allowbreak{}Switches(\%) & \centering\arraybackslash{}0.11 & \centering\arraybackslash{}0.23 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}113.75\% & \centering\arraybackslash{}0.22 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}106.86\% & \centering\arraybackslash{}0.23 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}112.30\% & \rule[-0.00pt]{0pt}{14.40pt} \\ \hline
+\raggedright\arraybackslash{}metric\_\allowbreak{}TMA\_\allowbreak{}....LCP(\%) & \centering\arraybackslash{}0.03 & \centering\arraybackslash{}0.04 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}3.90\% & \centering\arraybackslash{}0.04 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}15.07\% & \centering\arraybackslash{}0.04 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}15.53\% & \rule[-0.00pt]{0pt}{14.40pt} \\ \hline
+\raggedright\arraybackslash{}metric\_\allowbreak{}TMA\_\allowbreak{}....DSB\_\allowbreak{}Switches(\%) & \centering\arraybackslash{}5.38 & \centering\arraybackslash{}4.87 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}-9.43\% & \centering\arraybackslash{}5.03 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}-6.57\% & \centering\arraybackslash{}5.04 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}-6.33\% & \rule[-0.00pt]{0pt}{14.40pt} \\ \hline
+\raggedright\arraybackslash{}metric\_\allowbreak{}TMA\_\allowbreak{}..Fetch\_\allowbreak{}Bandwidth(\%) & \centering\arraybackslash{}4.35 & \centering\arraybackslash{}4.08 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}-6.29\% & \centering\arraybackslash{}4.49 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}3.10\% & \centering\arraybackslash{}4.52 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}3.78\% & \rule[-0.00pt]{0pt}{14.40pt} \\ \hline
+\raggedright\arraybackslash{}metric\_\allowbreak{}TMA\_\allowbreak{}....MITE(\%) & \centering\arraybackslash{}3.04 & \centering\arraybackslash{}2.71 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}-10.99\% & \centering\arraybackslash{}3.05 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}0.11\% & \centering\arraybackslash{}3.00 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}-1.52\% & \rule[-0.00pt]{0pt}{14.40pt} \\ \hline
+\raggedright\arraybackslash{}metric\_\allowbreak{}TMA\_\allowbreak{}....DSB(\%) & \centering\arraybackslash{}4.57 & \centering\arraybackslash{}4.21 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}-7.88\% & \centering\arraybackslash{}4.68 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}2.47\% & \centering\arraybackslash{}4.68 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}2.58\% & \rule[-0.00pt]{0pt}{14.40pt} \\ \hline
+\raggedright\arraybackslash{}metric\_\allowbreak{}TMA\_\allowbreak{}....MS(\%) & \centering\arraybackslash{}0.06 & \centering\arraybackslash{}0.15 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}158.28\% & \centering\arraybackslash{}0.15 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}156.18\% & \centering\arraybackslash{}0.15 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}155.19\% & \rule[-0.00pt]{0pt}{14.40pt} \\ \hline
+\cellcolor[HTML]{F8CBAD}\raggedright\arraybackslash{}metric\_\allowbreak{}TMA\_\allowbreak{}Bad\_\allowbreak{}Speculation(\%) & \cellcolor[HTML]{F8CBAD}\centering\arraybackslash{}8.28 & \cellcolor[HTML]{F8CBAD}\centering\arraybackslash{}7.47 & \cellcolor[HTML]{F8CBAD}\centering\arraybackslash{}-9.74\% & \cellcolor[HTML]{F8CBAD}\centering\arraybackslash{}8.21 & \cellcolor[HTML]{F8CBAD}\centering\arraybackslash{}-0.88\% & \cellcolor[HTML]{F8CBAD}\centering\arraybackslash{}8.25 & \cellcolor[HTML]{F8CBAD}\centering\arraybackslash{}-0.40\% & \rule[-0.00pt]{0pt}{14.40pt} \\ \hline
+\raggedright\arraybackslash{}metric\_\allowbreak{}TMA\_\allowbreak{}..Branch\_\allowbreak{}Mispredicts(\%) & \centering\arraybackslash{}7.93 & \centering\arraybackslash{}7.17 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}-9.51\% & \centering\arraybackslash{}7.87 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}-0.68\% & \centering\arraybackslash{}7.91 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}-0.20\% & \rule[-0.00pt]{0pt}{14.40pt} \\ \hline
+\raggedright\arraybackslash{}metric\_\allowbreak{}TMA\_\allowbreak{}....Cond\_\allowbreak{}NT\_\allowbreak{}Mispredicts(\%) & \centering\arraybackslash{}0.48 & \centering\arraybackslash{}0.42 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}-12.33\% & \centering\arraybackslash{}0.47 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}-2.54\% & \centering\arraybackslash{}0.47 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}-1.33\% & \rule[-0.00pt]{0pt}{14.40pt} \\ \hline
+\raggedright\arraybackslash{}metric\_\allowbreak{}TMA\_\allowbreak{}....Cond\_\allowbreak{}TK\_\allowbreak{}Mispredicts(\%) & \centering\arraybackslash{}0.38 & \centering\arraybackslash{}0.33 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}-13.04\% & \centering\arraybackslash{}0.37 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}-2.63\% & \centering\arraybackslash{}0.37 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}-1.91\% & \rule[-0.00pt]{0pt}{14.40pt} \\ \hline
+\raggedright\arraybackslash{}metric\_\allowbreak{}TMA\_\allowbreak{}....Ind\_\allowbreak{}Call\_\allowbreak{}Mispredicts(\%) & \centering\arraybackslash{}0.03 & \centering\arraybackslash{}0.08 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}168.50\% & \centering\arraybackslash{}0.08 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}171.12\% & \centering\arraybackslash{}0.08 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}171.00\% & \rule[-0.00pt]{0pt}{14.40pt} \\ \hline
+\raggedright\arraybackslash{}metric\_\allowbreak{}TMA\_\allowbreak{}....Ind\_\allowbreak{}Jump\_\allowbreak{}Mispredicts(\%) & \centering\arraybackslash{}0.06 & \centering\arraybackslash{}0.05 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}-18.23\% & \centering\arraybackslash{}0.06 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}-5.65\% & \centering\arraybackslash{}0.05 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}-8.40\% & \rule[-0.00pt]{0pt}{14.40pt} \\ \hline
+\raggedright\arraybackslash{}metric\_\allowbreak{}TMA\_\allowbreak{}....Ret\_\allowbreak{}Mispredicts(\%) & \centering\arraybackslash{}0.03 & \centering\arraybackslash{}0.05 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}80.83\% & \centering\arraybackslash{}0.05 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}96.04\% & \centering\arraybackslash{}0.05 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}96.28\% & \rule[-0.00pt]{0pt}{14.40pt} \\ \hline
+\raggedright\arraybackslash{}metric\_\allowbreak{}TMA\_\allowbreak{}....Other\_\allowbreak{}Mispredicts(\%) & \centering\arraybackslash{}2.15 & \centering\arraybackslash{}2.11 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}-1.51\% & \centering\arraybackslash{}2.20 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}2.55\% & \centering\arraybackslash{}2.21 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}2.83\% & \rule[-0.00pt]{0pt}{14.40pt} \\ \hline
+\raggedright\arraybackslash{}metric\_\allowbreak{}TMA\_\allowbreak{}..Machine\_\allowbreak{}Clears(\%) & \centering\arraybackslash{}0.35 & \centering\arraybackslash{}0.30 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}-14.81\% & \centering\arraybackslash{}0.33 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}-5.44\% & \centering\arraybackslash{}0.34 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}-4.87\% & \rule[-0.00pt]{0pt}{14.40pt} \\ \hline
+\raggedright\arraybackslash{}metric\_\allowbreak{}TMA\_\allowbreak{}....Other\_\allowbreak{}Nukes(\%) & \centering\arraybackslash{}0.05 & \centering\arraybackslash{}0.04 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}-22.11\% & \centering\arraybackslash{}0.04 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}-27.55\% & \centering\arraybackslash{}0.04 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}-34.93\% & \rule[-0.00pt]{0pt}{14.40pt} \\ \hline
+\cellcolor[HTML]{F8CBAD}\raggedright\arraybackslash{}metric\_\allowbreak{}TMA\_\allowbreak{}Backend\_\allowbreak{}Bound(\%) & \cellcolor[HTML]{F8CBAD}\centering\arraybackslash{}68.28 & \cellcolor[HTML]{F8CBAD}\centering\arraybackslash{}66.05 & \cellcolor[HTML]{F8CBAD}\centering\arraybackslash{}-3.25\% & \cellcolor[HTML]{F8CBAD}\centering\arraybackslash{}64.21 & \cellcolor[HTML]{F8CBAD}\centering\arraybackslash{}-5.95\% & \cellcolor[HTML]{F8CBAD}\centering\arraybackslash{}64.23 & \cellcolor[HTML]{F8CBAD}\centering\arraybackslash{}-5.92\% & \rule[-0.00pt]{0pt}{14.40pt} \\ \hline
+\raggedright\arraybackslash{}metric\_\allowbreak{}TMA\_\allowbreak{}..Memory\_\allowbreak{}Bound(\%) & \centering\arraybackslash{}62.99 & \centering\arraybackslash{}61.09 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}-3.02\% & \centering\arraybackslash{}58.94 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}-6.42\% & \centering\arraybackslash{}58.96 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}-6.39\% & \rule[-0.00pt]{0pt}{14.40pt} \\ \hline
+\raggedright\arraybackslash{}metric\_\allowbreak{}TMA\_\allowbreak{}....L1\_\allowbreak{}Bound(\%) & \centering\arraybackslash{}1.63 & \centering\arraybackslash{}2.76 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}68.72\% & \centering\arraybackslash{}2.31 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}41.30\% & \centering\arraybackslash{}2.59 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}58.73\% & \rule[-0.00pt]{0pt}{14.40pt} \\ \hline
+\raggedright\arraybackslash{}metric\_\allowbreak{}TMA\_\allowbreak{}....L2\_\allowbreak{}Bound(\%) & \centering\arraybackslash{}1.02 & \centering\arraybackslash{}1.56 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}52.14\% & \centering\arraybackslash{}1.23 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}19.79\% & \centering\arraybackslash{}1.27 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}24.60\% & \rule[-0.00pt]{0pt}{14.40pt} \\ \hline
+\raggedright\arraybackslash{}metric\_\allowbreak{}TMA\_\allowbreak{}....L3\_\allowbreak{}Bound(\%) & \centering\arraybackslash{}8.63 & \centering\arraybackslash{}12.17 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}41.02\% & \centering\arraybackslash{}9.80 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}13.49\% & \centering\arraybackslash{}9.63 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}11.53\% & \rule[-0.00pt]{0pt}{14.40pt} \\ \hline
+\raggedright\arraybackslash{}metric\_\allowbreak{}TMA\_\allowbreak{}....DRAM\_\allowbreak{}Bound(\%) & \centering\arraybackslash{}68.84 & \centering\arraybackslash{}63.20 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}-8.19\% & \centering\arraybackslash{}64.41 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}-6.44\% & \centering\arraybackslash{}64.44 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}-6.40\% & \rule[-0.00pt]{0pt}{14.40pt} \\ \hline
+\raggedright\arraybackslash{}metric\_\allowbreak{}TMA\_\allowbreak{}....Store\_\allowbreak{}Bound(\%) & \centering\arraybackslash{}0.77 & \centering\arraybackslash{}0.76 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}-1.70\% & \centering\arraybackslash{}0.80 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}3.36\% & \centering\arraybackslash{}0.81 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}4.40\% & \rule[-0.00pt]{0pt}{14.40pt} \\ \hline
+\raggedright\arraybackslash{}metric\_\allowbreak{}TMA\_\allowbreak{}..Core\_\allowbreak{}Bound(\%) & \centering\arraybackslash{}5.29 & \centering\arraybackslash{}4.97 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}-6.09\% & \centering\arraybackslash{}5.27 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}-0.37\% & \centering\arraybackslash{}5.27 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}-0.40\% & \rule[-0.00pt]{0pt}{14.40pt} \\ \hline
+\raggedright\arraybackslash{}metric\_\allowbreak{}TMA\_\allowbreak{}....Divider(\%) & \centering\arraybackslash{}0.01 & \centering\arraybackslash{}0.01 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}86.56\% & \centering\arraybackslash{}0.01 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}97.82\% & \centering\arraybackslash{}0.01 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}96.37\% & \rule[-0.00pt]{0pt}{14.40pt} \\ \hline
+\raggedright\arraybackslash{}metric\_\allowbreak{}TMA\_\allowbreak{}....Serializing\_\allowbreak{}Operation(\%) & \centering\arraybackslash{}0.51 & \centering\arraybackslash{}0.78 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}51.71\% & \centering\arraybackslash{}0.89 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}72.78\% & \centering\arraybackslash{}0.73 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}43.31\% & \rule[-0.00pt]{0pt}{14.40pt} \\ \hline
+\raggedright\arraybackslash{}metric\_\allowbreak{}TMA\_\allowbreak{}....AMX\_\allowbreak{}Busy(\%) & \centering\arraybackslash{}0.00 & \centering\arraybackslash{}0.00 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}N/A & \centering\arraybackslash{}0.00 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}N/A & \centering\arraybackslash{}0.00 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}N/A & \rule[-0.00pt]{0pt}{14.40pt} \\ \hline
+\raggedright\arraybackslash{}metric\_\allowbreak{}TMA\_\allowbreak{}....Ports\_\allowbreak{}Utilization(\%) & \centering\arraybackslash{}8.08 & \centering\arraybackslash{}8.93 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}10.51\% & \centering\arraybackslash{}9.29 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}14.95\% & \centering\arraybackslash{}9.49 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}17.38\% & \rule[-0.00pt]{0pt}{14.40pt} \\ \hline
+\cellcolor[HTML]{F8CBAD}\raggedright\arraybackslash{}metric\_\allowbreak{}TMA\_\allowbreak{}Retiring(\%) & \cellcolor[HTML]{F8CBAD}\centering\arraybackslash{}10.86 & \cellcolor[HTML]{F8CBAD}\centering\arraybackslash{}10.08 & \cellcolor[HTML]{F8CBAD}\centering\arraybackslash{}-7.16\% & \cellcolor[HTML]{F8CBAD}\centering\arraybackslash{}11.28 & \cellcolor[HTML]{F8CBAD}\centering\arraybackslash{}3.87\% & \cellcolor[HTML]{F8CBAD}\centering\arraybackslash{}11.30 & \cellcolor[HTML]{F8CBAD}\centering\arraybackslash{}4.07\% & \rule[-0.00pt]{0pt}{14.40pt} \\ \hline
+\raggedright\arraybackslash{}metric\_\allowbreak{}TMA\_\allowbreak{}..Light\_\allowbreak{}Operations(\%) & \centering\arraybackslash{}10.07 & \centering\arraybackslash{}9.28 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}-7.87\% & \centering\arraybackslash{}10.47 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}3.95\% & \centering\arraybackslash{}10.49 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}4.17\% & \rule[-0.00pt]{0pt}{14.40pt} \\ \hline
+\raggedright\arraybackslash{}metric\_\allowbreak{}TMA\_\allowbreak{}....FP\_\allowbreak{}Arith(\%) & \centering\arraybackslash{}0.03 & \centering\arraybackslash{}0.03 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}-5.26\% & \centering\arraybackslash{}0.03 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}-4.69\% & \centering\arraybackslash{}0.03 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}-5.15\% & \rule[-0.00pt]{0pt}{14.40pt} \\ \hline
+\raggedright\arraybackslash{}metric\_\allowbreak{}TMA\_\allowbreak{}....Int\_\allowbreak{}Operations(\%) & \centering\arraybackslash{}0.00 & \centering\arraybackslash{}0.00 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}17.94\% & \centering\arraybackslash{}0.00 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}19.83\% & \centering\arraybackslash{}0.00 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}23.33\% & \rule[-0.00pt]{0pt}{14.40pt} \\ \hline
+\raggedright\arraybackslash{}metric\_\allowbreak{}TMA\_\allowbreak{}....Memory\_\allowbreak{}Operations(\%) & \centering\arraybackslash{}5.12 & \centering\arraybackslash{}4.69 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}-8.41\% & \centering\arraybackslash{}5.33 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}4.01\% & \centering\arraybackslash{}5.31 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}3.66\% & \rule[-0.00pt]{0pt}{14.40pt} \\ \hline
+\raggedright\arraybackslash{}metric\_\allowbreak{}TMA\_\allowbreak{}....Fused\_\allowbreak{}Instructions(\%) & \centering\arraybackslash{}1.01 & \centering\arraybackslash{}0.93 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}-8.18\% & \centering\arraybackslash{}1.06 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}4.29\% & \centering\arraybackslash{}1.05 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}3.91\% & \rule[-0.00pt]{0pt}{14.40pt} \\ \hline
+\raggedright\arraybackslash{}metric\_\allowbreak{}TMA\_\allowbreak{}....Non\_\allowbreak{}Fused\_\allowbreak{}Branches(\%) & \centering\arraybackslash{}1.23 & \centering\arraybackslash{}1.12 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}-8.78\% & \centering\arraybackslash{}1.26 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}2.13\% & \centering\arraybackslash{}1.30 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}5.63\% & \rule[-0.00pt]{0pt}{14.40pt} \\ \hline
+\raggedright\arraybackslash{}metric\_\allowbreak{}TMA\_\allowbreak{}....Other\_\allowbreak{}Light\_\allowbreak{}Ops(\%) & \centering\arraybackslash{}2.67 & \centering\arraybackslash{}2.50 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}-6.35\% & \centering\arraybackslash{}2.80 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}4.66\% & \centering\arraybackslash{}2.80 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}4.67\% & \rule[-0.00pt]{0pt}{14.40pt} \\ \hline
+\raggedright\arraybackslash{}metric\_\allowbreak{}TMA\_\allowbreak{}..Heavy\_\allowbreak{}Operations(\%) & \centering\arraybackslash{}0.78 & \centering\arraybackslash{}0.80 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}1.96\% & \centering\arraybackslash{}0.80 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}2.75\% & \centering\arraybackslash{}0.81 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}2.79\% & \rule[-0.00pt]{0pt}{14.40pt} \\ \hline
+\raggedright\arraybackslash{}metric\_\allowbreak{}TMA\_\allowbreak{}....Few\_\allowbreak{}Uops\_\allowbreak{}Instructions(\%) & \centering\arraybackslash{}0.76 & \centering\arraybackslash{}0.70 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}-7.86\% & \centering\arraybackslash{}0.71 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}-6.71\% & \centering\arraybackslash{}0.70 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}-6.88\% & \rule[-0.00pt]{0pt}{14.40pt} \\ \hline
+\raggedright\arraybackslash{}metric\_\allowbreak{}TMA\_\allowbreak{}....Microcode\_\allowbreak{}Sequencer(\%) & \centering\arraybackslash{}0.03 & \centering\arraybackslash{}0.10 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}274.65\% & \centering\arraybackslash{}0.10 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}265.35\% & \centering\arraybackslash{}0.10 & \cellcolor[HTML]{D9D9D9}\centering\arraybackslash{}271.06\% & \rule[-0.00pt]{0pt}{14.40pt} \\ \hline
+\end{longtable}
+\endgroup\par
+\emptypar
+\ipar{18.00pt}{\hspace*{4\fontdimen2\font}This compares 3 VM configurations: 4K VM – disable THP and allocate 4K page to Guest, normal VM – enable THP and its memory mixes 4K and 2M pages, 2M page VM – allocate 2M page for it without 4K page.}
+\ipar{18.00pt}{\hspace*{4\fontdimen2\font}520.omnetpp\_r is memory-bound, and when we allocate 2M page for Guest, it can be observed that the performance gap (against bare metal) narrows from 16.15\% to 5.54\%. Obviously, the performance gain should benefit from backend a lot.}
+\ipar{18.00pt}{\hspace*{4\fontdimen2\font}But if we directly compare the topdown data side by side, we find that the frontend appears to be the primary cause of the gap, accounting for approximately \textasciitilde{}30\% more (relative increase of its ratio)! The difference in the backend figures is so small that it is impossible to determine exactly where the performance gain and gap are coming from.}
+\emptypar
+\npar{\hspace*{4\fontdimen2\font}So, the issue we face is that while topdown data is relatively suitable for reflecting the differences in workload between VMs and BMs, we lack an appropriate method for processing and comparing this top-down data across different systems. }
+\npar{\hspace*{4\fontdimen2\font}In the following section, we attempt to break down the performance gap into topdown metric.}
+\emptypar
+\numpara{18.00pt}{18.00pt}{\textbf{2.}}{\textbf{Calculation of }\textbf{score ratio for }\textbf{SPEC CPU benchmark}}
+\npar{\hspace*{4\fontdimen2\font}First of all, we need to construct a score model for the SPEC CPU benchmark.}
+\npar{\hspace*{4\fontdimen2\font}For SPECCPU 2017 throughput metric, the score is calculated by [2]:}
+\dmath{\mathit{score}=\mathit{number\_of\_copies}*\frac{\mathit{time\_on\_a\_reference\_machine}}{\mathit{time\_on\_the\_SUT}}}
+\dmath{=\mathit{number\_of\_copies}*\frac{\mathit{time\_on\_a\_reference\_machine}}{\mathit{measured\_time}\ (\mathit{\_on\_the\_test\_machine})}}
+\emptypar
+\npar{\hspace*{4\fontdimen2\font}On the other hand, the $\mathit{measured}\ \mathit{time}$ is related with $\mathit{total}\ \mathit{cycles}$ (required to completed workload) and $\mathit{effective}\ \mathit{frequency}$ (running at C0 state):}
+\dmath{\mathit{measured\_time}=\frac{\mathit{total\_cycles}}{\mathit{effective\_frequency}}}
+\dmath{=\frac{\mathit{total\_instruction\_count}\ (\mathit{IC})*\mathit{cycles\_per\_instruction}\ (\mathit{CPI})}{\mathit{frequency}\left( \mathit{Freq} \right)*\mathit{Utilization}\ (\mathit{Util})}}
+\dmath{=\frac{\mathit{IC}*\mathit{CPI}}{\mathit{Freq}*\mathit{Util}}}
+\npar{\hspace*{4\fontdimen2\font}Thereby, the score ratio between virtual machine (VM) and bare metal (BM) can be expressed as:}
+\dmath{\frac{\mathit{scor}{\mathit{e}}_{\mathit{VM}}}{\mathit{scor}{\mathit{e}}_{\mathit{BM}}}=\frac{\mathit{number\_of\_copies}*\frac{\mathit{time\_on\_a\_reference\_machine}}{{\mathit{measured\_time}}_{\mathit{VM}}}}{\mathit{number\_of\_copies}*\frac{\mathit{time\_on\_a\_reference\_machine}}{{\mathit{measured\_time}}_{\mathit{BM}}}}}
+\dmath{=\frac{{\mathit{measured\_time}}_{\mathit{BM}}}{{\mathit{measured\_time}}_{\mathit{VM}}}=\frac{\frac{\mathit{I}{\mathit{C}}_{\mathit{BM}}*\mathit{CP}{\mathit{I}}_{\mathit{BM}}}{\mathit{Fre}{\mathit{q}}_{\mathit{BM}}*\mathit{Uti}{\mathit{l}}_{\mathit{BM}}}}{\frac{\mathit{I}{\mathit{C}}_{\mathit{VM}}*\mathit{CP}{\mathit{I}}_{\mathit{VM}}}{\mathit{Fre}{\mathit{q}}_{\mathit{VM}}*\mathit{Uti}{\mathit{l}}_{\mathit{VM}}}}}
+\dmath{=\frac{{\mathit{IC}}_{\mathit{BM}}}{\mathit{I}{\mathit{C}}_{\mathit{VM}}}*\frac{\mathit{CP}{\mathit{I}}_{\mathit{BM}}}{{\mathit{CPI}}_{\mathit{VM}}}*\frac{\mathit{Fre}{\mathit{q}}_{\mathit{VM}}*\mathit{Uti}{\mathit{l}}_{\mathit{VM}}}{\mathit{Fre}{\mathit{q}}_{\mathit{BM}}*\mathit{Uti}{\mathit{l}}_{\mathit{BM}}}\quad\text{(*)}}
+\emptypar
+\numpara{18.00pt}{18.00pt}{\textbf{(1)}}{\textbf{Calculation of the ratio of }${\symbfit{IC}}_{\symbfit{BM}}$\textbf{ and }${\symbfit{IC}}_{\symbfit{VM}}$}
+\npar{\hspace*{4\fontdimen2\font}Firstly, we can calculate the ratio of ${\mathit{IC}}_{\mathit{BM}}$ and ${\mathit{IC}}_{\mathit{VM}}$. For the total instructions of virtual machine ($\mathit{I}{\mathit{C}}_{\mathit{VM}}$), compared with bare metal case, it has the extra part which includes instructions of hypervisor ($\mathit{I}{\mathit{C}}_{\mathit{HY}}$):}
+\dmath{\mathit{I}{\mathit{C}}_{\mathit{VM}}=\mathit{I}{\mathit{C}}_{\mathit{BM}}+\mathit{I}{\mathit{C}}_{\mathit{HY}}}
+\npar{\hspace*{4\fontdimen2\font}So, the ratio of ${\mathit{IC}}_{\mathit{BM}}$ and ${\mathit{IC}}_{\mathit{VM}}$ can be calculated via:}
+\dmath{\frac{{\mathit{IC}}_{\mathit{BM}}}{{\mathit{IC}}_{\mathit{VM}}}=\frac{1}{\frac{{\mathit{IC}}_{\mathit{VM}}}{{\mathit{IC}}_{\mathit{BM}}}}=\frac{1}{\frac{{\mathit{IC}}_{\mathit{BM}}+\mathit{I}{\mathit{C}}_{\mathit{HY}}}{{\mathit{IC}}_{\mathit{BM}}}}=\frac{1}{1+\frac{\mathit{I}{\mathit{C}}_{\mathit{HY}}}{{\mathit{IC}}_{\mathit{BM}}}}}
+\emptypar
+\npar{\hspace*{4\fontdimen2\font}Thus, the ratio of ${\mathit{IC}}_{\mathit{BM}}$ and ${\mathit{IC}}_{\mathit{VM}}$ depends on the ratio of ${\mathit{IC}}_{\mathit{HY}}$ and ${\mathit{IC}}_{\mathit{BM}}$. Since the guest executes exactly the same workload as the bare metal, the instructions retired in guest mode during the VM run (${\mathit{IC}}_{\mathit{G}}$) can be regarded as the instructions of the bare metal case, i.e., ${\mathit{IC}}_{\mathit{BM}}\approx {\mathit{IC}}_{\mathit{G}}$. In fact, this ratio can be further calculated via sampling data on hypervisor (host):}
+\dmath{\left( \mathit{define} \right)\symbfit{\alpha}=\frac{\mathit{I}{\mathit{C}}_{\mathit{HY}}}{{\mathit{IC}}_{\mathit{BM}}}}
+\dmath{\approx \frac{{\mathit{instructions\_per\_second}\ (\mathit{IPS})}_{\mathit{HY}}*{\mathit{measured\_time\_in\_second}}_{\mathit{VM}}}{{\mathit{instructions\_per\_second}\ (\mathit{IPS})}_{\mathit{G}}*{\mathit{measured\_time\_in\_second}}_{\mathit{VM}}}}
+\dmath{=\frac{\mathit{I}{\mathit{PS}}_{\mathit{HY}}}{\mathit{I}{\mathit{PS}}_{\mathit{G}}}=\frac{\frac{\mathit{sampling\_}{\mathit{instructions}}_{\mathit{HY}}}{\mathit{sampling\_time}}}{\frac{\mathit{sampling\_}{\mathit{instructions}}_{\mathit{G}}}{\mathit{sampling\_time}}}}
+\dmath{=\frac{\mathit{sampling\_}{\mathit{instructions}}_{\mathit{HY}}}{\mathit{sampling\_}{\mathit{instructions}}_{\mathit{G}}}}
+\npar{\hspace*{4\fontdimen2\font}We can sample instructions of both hypervisor (host mode, “:H”) and guest (guest mode, “:G”) at hypervisor by “perf” in a short period. For example, sample instructions for 20 seconds:}
+\emptypar
+\npar{\textit{perf }\textit{stat}\textit{ -e }\textit{instructions:G}\textit{ -e }\textit{instructions:H}\textit{ -e instructions -a }\textit{-{}-per}\textit{-socket -r 5 sleep 20}}
+\emptypar
+\npar{\hspace*{4\fontdimen2\font}For 520.omnetpp\_r (Guest with 2M huge page), we got the sample result:}
+\par\vspace{0.097in}\noindent\hspace*{0.817in}%
+\perfbox{4.524in}{1.510in}{%
+\textit{Performance\ counter\ stats\ for\ \textquotesingle{}system\ wide\textquotesingle{}\ (5\ runs):}\par
+\textit{~}\par
+\textit{S0\ \ \ \ \ \ 240\ \ 5,401,663,876,495\ \ \ \ \ \ instructions:G}\par
+\textit{S0\ \ \ \ \ \ 240\ \ \ \ \ 62,126,035,198\ \ \ \ \ \ instructions:H}\par
+\textit{S0\ \ \ \ \ \ 240\ \ 5,463,789,851,073\ \ \ \ \ \ instructions}\par
+\textit{~}\par
+\hspace*{9\fontdimen2\font}\textit{20.023861\ +-\ 0.000275\ seconds\ time\ elapsed\ \ (\ +-\ \ 0.00\%\ )}}\par
+\npar{\hspace*{4\fontdimen2\font}Here, we can get the $\symbfit{\alpha}=1.15\%$.}
+\emptypar
+\numpara{18.00pt}{18.00pt}{\textbf{(2)}}{\textbf{Calculation of the ratio of }$\symbfit{Fre}{\symbfit{q}}_{\symbfit{VM}}*\symbfit{Uti}{\symbfit{l}}_{\symbfit{VM}}$\textbf{ and }$\symbfit{Fre}{\symbfit{q}}_{\symbfit{BM}}*\symbfit{Uti}{\symbfit{l}}_{\symbfit{BM}}$}
+\npar{\hspace*{4\fontdimen2\font}In the test, we assume that the power policies for the VM and BM are the same and that the frequency remains constant, so,}
+\dmath{\mathit{Fre}{\mathit{q}}_{\mathit{VM}}=\mathit{Fre}{\mathit{q}}_{\mathit{BM}}}
+\npar{\hspace*{4\fontdimen2\font}As for utilization, while it remains at 100\% in the vast majority of SPECCPU cases—for both VM and BM—we can also define a $\beta $ variable for the sake of accuracy and verify it through sampling:}
+\dmath{\left( \mathit{define} \right)\symbfit{\beta}=\frac{\mathit{Uti}{\mathit{l}}_{\mathit{VM}}}{\mathit{Uti}{\mathit{l}}_{\mathit{BM}}}}
+\dmath{=\frac{\mathit{Uti}{\mathit{l}}_{\mathit{VM}}}{\mathit{Uti}{\mathit{l}}_{\mathit{BM}}}*1=\frac{\mathit{Uti}{\mathit{l}}_{\mathit{VM}}}{\mathit{Uti}{\mathit{l}}_{\mathit{BM}}}*\frac{\mathit{Fre}{\mathit{q}}_{\mathit{VM}}}{\mathit{Fre}{\mathit{q}}_{\mathit{BM}}}}
+\npar{\hspace*{4\fontdimen2\font}(In general, if the frequencies of VM and BM are different, $\beta $ can be directly defined as $\beta =\frac{{\mathit{Freq}}_{\mathit{VM}}*{\mathit{Util}}_{\mathit{VM}}}{{\mathit{Freq}}_{\mathit{BM}}*{\mathit{Util}}_{\mathit{BM}}}$, which is the ratio of “cycles/TSC” between the VM case and the BM case and can be sampled by “perf” in the same way.)}
+\emptypar
+\npar{\hspace*{4\fontdimen2\font}For example, to get utilization of virtual machine case, we can sample “ref-cycles” and “tsc” via “perf”:}
+\emptypar
+\npar{\textit{perf }\textit{stat}\textit{ -e }\textit{ref-cycles:H,ref-cycles:G,ref-cycles,msr}\textit{/}\textit{tsc}\textit{/ -a -{}-per-socket -r 5 sleep 100}}
+\emptypar
+\npar{\hspace*{4\fontdimen2\font}For 520.omnetpp\_r (Guest with 2M huge page), we got the sample result:}
+\par\vspace{0.097in}\noindent\hspace*{0.817in}%
+\perfbox{4.524in}{1.668in}{%
+\textit{Performance\ counter\ stats\ for\ \textquotesingle{}system\ wide\textquotesingle{}\ (5\ runs):}\par
+\textit{~}\par
+\textit{S0\ \ \ \ \ \ 240\ \ 1,604,340,074,544\ \ \ \ \ \ ref-cycles:H}\par
+\textit{S0\ \ \ \ \ \ 240\ 68,013,219,077,920\ \ \ \ \ \ ref-cycles:G}\par
+\textit{S0\ \ \ \ \ \ 240\ 69,617,559,625,628\ \ \ \ \ \ ref-cycles}\par
+\textit{S0\ \ \ \ \ \ 240\ 69,617,881,400,254\ \ \ \ \ \ msr/tsc/}\par
+\textit{~}\par
+\hspace*{8\fontdimen2\font}\textit{100.026677\ +-\ 0.000505\ seconds\ time\ elapsed\ \ (\ +-\ \ 0.00\%\ )}}\par
+\npar{\hspace*{4\fontdimen2\font}Thus, the utilization of running Guest is 100\%. Similarly, we observed that the utilization rate of the bare metal was also 100\%. So, for this case the $\symbfit{\beta}=100\%$.}
+\emptypar
+\numpara{18.00pt}{18.00pt}{\textbf{(3)}}{\textbf{Calculation of the ratio of }${\symbfit{S}\symbfit{c}\symbfit{ore}}_{\symbfit{VM}}$\textbf{ and }${\symbfit{Score}}_{\symbfit{BM}}$}
+\npar{\hspace*{4\fontdimen2\font}Combining the derivations in (1) and (2), we can express the formula for (*) as:}
+\emptypar
+\dmath{\left( \mathit{define} \right)\mathit{r}=\frac{\mathit{scor}{\mathit{e}}_{\mathit{VM}}}{\mathit{scor}{\mathit{e}}_{\mathit{BM}}}=\frac{\beta }{1+\alpha }*\frac{\mathit{CP}{\mathit{I}}_{\mathit{BM}}}{{\mathit{CPI}}_{\mathit{VM}}}\quad\text{(**)}}
+\npar{Here (as defined in section 2.(1), $\alpha =\frac{{\mathit{IC}}_{\mathit{HY}}}{{\mathit{IC}}_{\mathit{BM}}}$, which is sampled as the ratio of instructions per second between hypervisor and guest),}
+\dmath{\alpha =\frac{\mathit{I}{\mathit{PS}}_{\mathit{HY}}}{\mathit{I}{\mathit{PS}}_{\mathit{G}}},}
+\dmath{\beta =\frac{\mathit{Uti}{\mathit{l}}_{\mathit{VM}}}{\mathit{Uti}{\mathit{l}}_{\mathit{BM}}}.}
+\emptypar
+\npar{\hspace*{4\fontdimen2\font}Both of these can be obtained using the “perf” command with short period.}
+\emptypar
+\numpara{18.00pt}{18.00pt}{\textbf{3.}}{\textbf{Break down score gap into }\textbf{topdown}\textbf{ metric}}
+\emptypar
+\numpara{18.00pt}{18.00pt}{\textbf{(1)}}{\textbf{Calculation of extra CPI between VM and BM}}
+\npar{\hspace*{4\fontdimen2\font}We can consider the extra cycles per instruction ($\Delta \mathit{eCPI}$) introduced by virtualization:}
+\dmath{\Delta \mathit{eCPI}=\mathit{eCP}{\mathit{I}}_{\mathit{VM}}-\mathit{CP}{\mathit{I}}_{\mathit{BM}}\quad\text{(***)}}
+\npar{\hspace*{4\fontdimen2\font}Note the $\mathit{eCPI}$ means the truly effective $\mathit{CPI}$, where the instructions belong to workload, i.e.,}
+\dmath{\mathit{eCP}{\mathit{I}}_{\mathit{VM}}=\frac{\mathit{cycle}{\mathit{s}}_{\mathit{VM}}}{\mathit{instruction}{\mathit{s}}_{\mathit{BM}}}=\frac{\mathit{cycle}{\mathit{s}}_{\mathit{VM}}}{\mathit{instruction}{\mathit{s}}_{\mathit{VM}}}*\frac{\mathit{instruction}{\mathit{s}}_{\mathit{VM}}}{\mathit{instruction}{\mathit{s}}_{\mathit{BM}}}}
+\dmath{=\frac{\mathit{cycle}{\mathit{s}}_{\mathit{VM}}}{\mathit{instruction}{\mathit{s}}_{\mathit{VM}}}*\left( 1+\alpha  \right)=(1+\alpha )*\mathit{CP}{\mathit{I}}_{\mathit{VM}}}
+\npar{Combining with formula (**), the above formula can be expressed as:}
+\dmath{\Delta \mathit{eCPI}=\mathit{eCP}{\mathit{I}}_{\mathit{VM}}-\mathit{CP}{\mathit{I}}_{\mathit{BM}}}
+\dmath{=(1+\alpha )*\mathit{CP}{\mathit{I}}_{\mathit{VM}}-\mathit{r}*\frac{1+\alpha }{\beta }*{\mathit{CPI}}_{\mathit{VM}}}
+\dmath{=\left( 1+\alpha  \right)*\left( \mathit{CP}{\mathit{I}}_{\mathit{VM}}-\frac{\mathit{r}}{\beta }*{\mathit{CPI}}_{\mathit{VM}} \right)}
+\dmath{=\left( 1+\alpha  \right)*\mathit{CP}{\mathit{I}}_{\mathit{VM}}*\left( 1-\frac{\mathit{r}}{\beta } \right)\quad\text{(****)}}
+\emptypar
+\emptypar
+\numpara{18.00pt}{18.00pt}{\textbf{(2)}}{\textbf{Calculation }\textbf{of }\textbf{extra CPI based on }\textbf{topdown}\textbf{ }\textbf{metric}}
+\npar{\hspace*{4\fontdimen2\font}On the other hand, let’s consider the topdown expression.}
+\npar{\hspace*{4\fontdimen2\font}Topdown divides the CPU slot state into the following sections: frontend bound, bad speculation, backend bound and retiring. These four segments do not overlap, and they represent the proportion of CPU cycles consumed by each segment during workload execution.}
+\npar{\hspace*{4\fontdimen2\font}Therefore, for the ratios of these top-level nodes (the highest-level nodes) in topdown—that is, the TMA (Top-down Microarchitecture Analysis) metric in emon—we have the following formula:}
+\dmath{\sum\limits_{\mathit{i}\in \mathit{TMA}}{\mathit{Rati}{\mathit{o}}_{\mathit{i}}}=100\%\quad\text{(*****)}}
+\npar{\hspace*{9.60pt}The $\mathit{Rati}{\mathit{o}}_{\mathit{i}}$ means the proportion of each top-level node in the TMA.}
+\npar{\hspace*{9.60pt}Note, all the PMU data in this document (including the TMA data of both the BM case and the VM case) are sampled on the BM/host side system-wide, without the guest/host mode filter. Therefore, for the VM case, the TMA ratios cover all the cycles of the VM run, i.e., the cycles of guest mode, host mode (hypervisor) and the transitions between them, which is consistent with ${\mathit{cycles}}_{\mathit{VM}}$ in ${\mathit{eCPI}}_{\mathit{VM}}$ (see (***)).}
+\npar{\hspace*{4\fontdimen2\font}Combining formula (***) and (*****), we can get:}
+\dmath{\Delta \mathit{eCPI}=\mathit{eCP}{\mathit{I}}_{\mathit{VM}}-\mathit{CP}{\mathit{I}}_{\mathit{BM}}}
+\dmath{=\left( 1+\alpha  \right)*\mathit{CP}{\mathit{I}}_{\mathit{VM}}*\sum\limits_{\mathit{i}\in \mathit{TMA}}{\mathit{Rati}{\mathit{o}}_{\mathit{i},\mathit{VM}}}-\mathit{CP}{\mathit{I}}_{\mathit{BM}}*\sum\limits_{\mathit{i}\in \mathit{TMA}}{\mathit{Rati}{\mathit{o}}_{\mathit{i},\mathit{BM}}}}
+\dmath{=\sum\limits_{\mathit{i}\in \mathit{TMA}}{\left[ \left( 1+\alpha  \right)*\mathit{CP}{\mathit{I}}_{\mathit{VM}}*\mathit{Rati}{\mathit{o}}_{\mathit{i},\mathit{VM}}-\mathit{CP}{\mathit{I}}_{\mathit{BM}}*\mathit{Rati}{\mathit{o}}_{\mathit{i},\mathit{BM}} \right]}}
+\emptypar
+\npar{\hspace*{9.60pt}Here, $\mathit{Rati}{\mathit{o}}_{\mathit{i},\mathit{VM}}$ means the TMA ratio of virtual machine case and $\mathit{Rati}{\mathit{o}}_{\mathit{i},\mathit{BM}}$ means that for bare metal case. About $\mathit{CPI}*\sum\limits_{\mathit{i}\in \mathit{TMA}}{\mathit{Rati}{\mathit{o}}_{\mathit{i}}}$, it can reflect the contribution of each TMA component to cycles. In each cycle, every slot must be classified into one of the TMA categories:}
+\dmath{\mathit{issue\_width}=\mathit{total\_slots\_per\_cycle}=\sum\limits_{\mathit{i}\in \mathit{TMA}}{\mathit{slots\_per\_cycl}{\mathit{e}}_{\mathit{i}}}}
+\npar{\hspace*{9.60pt}Sum up the slots according to each cycle\textquotesingle{}s situation:}
+\dmath{\mathit{issue\_width}*\mathit{cycles}=\mathit{total\_slots}}
+\dmath{=\sum\limits_{\mathit{j}\in \left[ 0,\mathit{cycles} \right)}{\mathit{total\_slots\_per\_cycle}}}
+\dmath{=\sum\limits_{\mathit{j}\in [0,\mathit{cycles})}{\sum\limits_{\mathit{i}\in \mathit{TMA}}{\mathit{slots\_per\_cycl}{\mathit{e}}_{\mathit{i},\mathit{j}}}}}
+\dmath{=\sum\limits_{\mathit{j}\in [0,\mathit{cycles})}{\sum\limits_{\mathit{i}\in \mathit{TMA}}{\mathit{slots\_per\_cycl}{\mathit{e}}_{\mathit{i},\mathit{j}}}}=\sum\limits_{\mathit{i}\in \mathit{TMA}}{\mathit{slot}{\mathit{s}}_{\mathit{i}}}}
+\npar{\hspace*{9.60pt}So the above formula describes the relationship between cycles and slots. Then based on this relationship, we can break down CPI into TMA categories:}
+\dmath{\mathit{CPI}=\frac{\mathit{cycles}}{\mathit{instructions}}=\frac{{\mathit{total\_slots}}/{\mathit{issue\_width}}}{\mathit{instructions}}}
+\dmath{=\sum\limits_{\mathit{i}\in \mathit{TMA}}{\frac{{\mathit{slot}{\mathit{s}}_{\mathit{i}}}/{\mathit{issue\_width}}}{\mathit{instructions}}}}
+\dmath{=\frac{\mathit{cycles}}{\mathit{instructions}}*\sum\limits_{\mathit{i}\in \mathit{TMA}}{\frac{\mathit{slot}{\mathit{s}}_{\mathit{i}}}{\mathit{cycles}*\mathit{issue\_width}}}}
+\dmath{=\mathit{CPI}*\sum\limits_{\mathit{i}\in \mathit{TMA}}{\frac{\mathit{slot}{\mathit{s}}_{\mathit{i}}}{\mathit{cycles}*\mathit{issue\_width}}=\mathit{CPI}*\sum\limits_{\mathit{i}\in \mathit{TMA}}{\mathit{Rati}{\mathit{o}}_{\mathit{i}}}}}
+\npar{\hspace*{4\fontdimen2\font}Furthermore, considering the (*) formula, we can simplify the above formula as:}
+\dmath{\Delta \mathit{eCPI}=\mathit{eCP}{\mathit{I}}_{\mathit{VM}}-\mathit{CP}{\mathit{I}}_{\mathit{BM}}}
+\dmath{=\sum\limits_{\mathit{i}\in \mathit{TMA}}{\left[ \left( 1+\alpha  \right)*\mathit{CP}{\mathit{I}}_{\mathit{VM}}*\mathit{Rati}{\mathit{o}}_{\mathit{i},\mathit{VM}}-\mathit{CP}{\mathit{I}}_{\mathit{BM}}*\mathit{Rati}{\mathit{o}}_{\mathit{i},\mathit{BM}} \right]}}
+\dmath{=\sum\limits_{\mathit{i}\in \mathit{TMA}}{\left[ \left( 1+\alpha  \right)*\mathit{CP}{\mathit{I}}_{\mathit{VM}}*\mathit{Rati}{\mathit{o}}_{\mathit{i},\mathit{VM}}-{\mathit{CPI}}_{\mathit{VM}}*\mathit{r}*\frac{1+\alpha }{\beta }*\mathit{Rati}{\mathit{o}}_{\mathit{i},\mathit{BM}} \right]}}
+\dmath{=\left( 1+\alpha  \right)*\mathit{CP}{\mathit{I}}_{\mathit{VM}}*\sum\limits_{\mathit{i}\in \mathit{TMA}}{(\ \mathit{Rati}{\mathit{o}}_{\mathit{i},\mathit{VM}}}-\frac{\mathit{r}}{\beta }*\mathit{Rati}{\mathit{o}}_{\mathit{i},\mathit{BM}})\quad\text{(******)}}
+\emptypar
+\numpara{18.00pt}{18.00pt}{\textbf{(3)}}{\textbf{Break down performance gap based on }\textbf{topdown}}
+\npar{\hspace*{9.60pt}Given the formula (****) and (******), we have:}
+\dmath{\left( 1+\alpha  \right)*\mathit{CP}{\mathit{I}}_{\mathit{VM}}*\left( 1-\frac{\mathit{r}}{\beta } \right)=\left( 1+\alpha  \right)*\mathit{CP}{\mathit{I}}_{\mathit{VM}}*\sum\limits_{\mathit{i}\in \mathit{TMA}}{(\ \mathit{Rati}{\mathit{o}}_{\mathit{i},\mathit{VM}}}-\frac{\mathit{r}}{\beta }*\mathit{Rati}{\mathit{o}}_{\mathit{i},\mathit{BM}})}
+\dmath{\Leftrightarrow 1-\frac{\mathit{r}}{\beta }=\sum\limits_{\mathit{i}\in \mathit{TMA}}{(\ \mathit{Rati}{\mathit{o}}_{\mathit{i},\mathit{VM}}}-\frac{\mathit{r}}{\beta }*\mathit{Rati}{\mathit{o}}_{\mathit{i},\mathit{BM}})}
+\dmath{\Leftrightarrow 1-\mathit{r}=\sum\limits_{\mathit{i}\in \mathit{TMA}}{(\ \mathit{Rati}{\mathit{o}}_{\mathit{i},\mathit{VM}}}-\frac{\mathit{r}}{\beta }*\mathit{Rati}{\mathit{o}}_{\mathit{i},\mathit{BM}})+\mathit{r}*(\frac{1}{\beta }-1)}
+\emptypar
+\emptypar
+\emptypar
+\emptypar
+\npar{\hspace*{4\fontdimen2\font}Note, we express the performance gap ratio between virtual machine and bare metal by:}
+\dmath{\mathit{ga}{\mathit{p}}_{\mathit{ratio}}=\frac{\mathit{scor}{\mathit{e}}_{\mathit{BM}}-\mathit{scor}{\mathit{e}}_{\mathit{VM}}}{\mathit{scor}{\mathit{e}}_{\mathit{BM}}}=1-\mathit{r}}
+\npar{\hspace*{4\fontdimen2\font}Therefore, we can re-express the $\mathit{ga}{\mathit{p}}_{\mathit{ratio}}$ with TMA ratios via:}
+\dmath{\mathit{ga}{\mathit{p}}_{\mathit{ratio}}=\sum\limits_{\mathit{i}\in \mathit{TMA}}{\left( \mathit{Rati}{\mathit{o}}_{\mathit{i},\mathit{VM}}-\frac{\mathit{r}}{\beta }*\mathit{Rati}{\mathit{o}}_{\mathit{i},\mathit{BM}} \right)}+\mathit{r}*(\frac{1}{\beta }-1)}
+\dmath{=\sum\limits_{\mathit{i}\in \mathit{TMA}}{\mathit{ga}{\mathit{p}}_{\mathit{i},\mathit{ratio\_TMA}}}+\mathit{r}*(\frac{1}{\beta }-1)}
+\npar{\hspace*{4\fontdimen2\font}Here,}
+\dmath{\mathit{r}=\frac{\mathit{Scor}{\mathit{e}}_{\mathit{VM}}}{\mathit{Scor}{\mathit{e}}_{\mathit{BM}}},\beta =\frac{\mathit{Uti}{\mathit{l}}_{\mathit{VM}}}{\mathit{Uti}{\mathit{l}}_{\mathit{BM}}},}
+\dmath{\mathit{ga}{\mathit{p}}_{\mathit{i},\mathit{ratio\_TMA}}=\mathit{Rati}{\mathit{o}}_{\mathit{i},\mathit{VM}}-\frac{\mathit{r}}{\beta }*\mathit{Rati}{\mathit{o}}_{\mathit{i},\mathit{BM}},}
+\dmath{{\mathit{gap}}_{\mathit{virt}}=\mathit{r}*\left( \frac{1}{\beta }-1 \right).}
+\npar{\hspace*{4\fontdimen2\font}This formula actually breaks down the performance gap into topdown components (${\mathit{gap}}_{\mathit{i},\mathit{ratio\_TMA}}$) and the remaining term ${\mathit{gap}}_{\mathit{virt}}$, which is only caused by the difference of utilization ($\beta $) and becomes 0 when $\beta =100\%$. Note that the instruction expansion of virtualization ($\alpha $) cancels out in this formula: since the TMA of the VM case is sampled on the host side and covers all the cycles of the VM run, the cycles consumed by the hypervisor have already been included in ${\mathit{Ratio}}_{\mathit{i},\mathit{VM}}$, and they are distributed into the TMA categories according to their own micro-architectural behavior (not only into Retiring).}
+\emptypar
+\numpara{18.00pt}{18.00pt}{\textbf{(4)}}{\textbf{Further break down performance gap with }\textbf{topdown}\textbf{ sub}\textbf{-}\textbf{node}}
+\npar{\hspace*{4\fontdimen2\font}For now, we’ve broken down the performance gap into the high-level topdown nodes ($\mathit{ga}{\mathit{p}}_{\mathit{i},\mathit{ratio\_TMA}}$). Furthermore, sub-nodes essentially represent a further subdivision of the parent node; in principle, the combined percentage of sub-nodes at the same level may not be 100\%. However, we can use weight factors to represent the relationship between the parent node and its sub-nodes, that is,}
+\dmath{{\mathit{Ratio}}_{\mathit{i},\mathit{E}}={\mathit{w}}_{\mathit{i},\mathit{E}}\sum\limits_{\mathit{j}\in \mathit{TMA\_sub\_node}}{{\mathit{sub\_Ratio}}_{\mathit{i},\mathit{j},\mathit{E}}},\quad \mathit{E}\in \{\mathit{VM},\mathit{BM}\}}
+\npar{\hspace*{4\fontdimen2\font}For node $\mathit{i}$ in environment $\mathit{E}$, it has the TMA ${\mathit{Ratio}}_{\mathit{i},\mathit{E}}$, and ${\mathit{w}}_{\mathit{i},\mathit{E}}$ is the weight factor for its sub-nodes. Note that the weight factors of the same node are generally different between VM and BM (e.g., for Memory\_Bound in the table of section 1, $\mathit{w}=0.78$ for BM and $\mathit{w}=0.75$ for 2M VM), so they must be calculated for each environment separately. Based on this relationship, we can express the linear sum of the sub-nodes as:}
+\dmath{100\%=\sum\limits_{\mathit{i}\in \mathit{TMA}}{\mathit{Rati}{\mathit{o}}_{\mathit{i}}}=\sum\limits_{\mathit{i}\in \mathit{TMA}}{{\mathit{w}}_{\mathit{i}}\sum\limits_{\mathit{j}\in \mathit{TMA\_sub\_node}}{\mathit{sub\_Rati}{\mathit{o}}_{\mathit{i},\mathit{j}}}}}
+\npar{\hspace*{4\fontdimen2\font}Thereby, we can break down the performance gap into more detailed entries (sub-nodes) of TMA:}
+\dmath{\mathit{ga}{\mathit{p}}_{\mathit{ratio}}=\sum\limits_{\mathit{i}\in \mathit{TMA}}{\left( \mathit{Rati}{\mathit{o}}_{\mathit{i},\mathit{VM}}-\frac{\mathit{r}}{\beta }*\mathit{Rati}{\mathit{o}}_{\mathit{i},\mathit{BM}} \right)}+\mathit{r}*(\frac{1}{\beta }-1)}
+\dmath{=\sum\limits_{\mathit{i}\in \mathit{TMA}}{\sum\limits_{\mathit{j}\in \mathit{TMA\_sub\_node}}{\left( {\mathit{w}}_{\mathit{i},\mathit{VM}}*{\mathit{sub\_Ratio}}_{\mathit{i},\mathit{j},\mathit{VM}}-\frac{\mathit{r}}{\beta }*{\mathit{w}}_{\mathit{i},\mathit{BM}}*{\mathit{sub\_Ratio}}_{\mathit{i},\mathit{j},\mathit{BM}} \right)}}+\mathit{r}*\left( \frac{1}{\beta }-1 \right)}
+\dmath{=\sum\limits_{\mathit{i}\in \mathit{TMA}}{\sum\limits_{\mathit{j}\in \mathit{TMA\_sub\_node}}{{\mathit{gap}}_{\mathit{i},\mathit{j},\mathit{ratio\_sub\_TMA}}}}+{\mathit{gap}}_{\mathit{virt}}}
+\npar{\hspace*{4\fontdimen2\font}Here,}
+\dmath{\mathit{r}=\frac{\mathit{Scor}{\mathit{e}}_{\mathit{VM}}}{\mathit{Scor}{\mathit{e}}_{\mathit{BM}}},\beta =\frac{\mathit{Uti}{\mathit{l}}_{\mathit{VM}}}{\mathit{Uti}{\mathit{l}}_{\mathit{BM}}}}
+\dmath{{\mathit{gap}}_{\mathit{i},\mathit{j},\mathit{ratio\_sub\_TMA}}={\mathit{w}}_{\mathit{i},\mathit{VM}}*{\mathit{sub\_Ratio}}_{\mathit{i},\mathit{j},\mathit{VM}}-\frac{\mathit{r}}{\beta }*{\mathit{w}}_{\mathit{i},\mathit{BM}}*{\mathit{sub\_Ratio}}_{\mathit{i},\mathit{j},\mathit{BM}},}
+\npar{\hspace*{4\fontdimen2\font}Thus, based on the above formula, we can iteratively decompose the $\mathit{ga}{\mathit{p}}_{\mathit{ratio}}$ from the top-level node down to lower-level nodes by calculating the gap ratio ($\mathit{ga}{\mathit{p}}_{\mathit{i},\mathit{j},\mathit{ratio\_sub\_TMA}}$) for each layer of TMA nodes. This allows us to decompose the gap across the entire TMA, enabling us to determine the contribution of each individual TMA entry to the gap.}
+\npar{\hspace*{4\fontdimen2\font}Since the weight factors of each environment have been absorbed into ${\mathit{gap}}_{\mathit{i},\mathit{j},\mathit{ratio\_sub\_TMA}}$, the gap ratios of the sub-nodes add up exactly to the gap ratio of their parent node ($\sum\limits_{\mathit{j}\in \mathit{TMA\_sub\_node}}{{\mathit{gap}}_{\mathit{i},\mathit{j},\mathit{ratio\_sub\_TMA}}}={\mathit{gap}}_{\mathit{i},\mathit{ratio\_TMA}}$), so they are directly comparable in the unit of the score gap. Note that the sub-nodes under the same parent may overlap in TMA (some of them are cycle-based estimations), so this proportional allocation is an approximation; the unweighted gap ratio (${\mathit{sub\_Ratio}}_{\mathit{i},\mathit{j},\mathit{VM}}-\frac{\mathit{r}}{\beta }*{\mathit{sub\_Ratio}}_{\mathit{i},\mathit{j},\mathit{BM}}$) can be used as a reference to rank the sub-nodes under the same parent node.}
+\emptypar
+\numpara{18.00pt}{18.00pt}{\textbf{(5)}}{\textbf{Consistency check: score-based view vs EMON-window view}}
+\npar{\hspace*{4\fontdimen2\font}The breakdown above uses the score ratio $\mathit{r}$ to obtain the cycle ratio between BM and VM, so that only the TMA ratios are taken from the PMU data. This does not require aligned timelines, but it does require that the TMA ratios of every case represent its scored run, e.g., the sampled window of every case covers its whole run, or every window covers the same steady-state phase. This can be checked with the CPI of the same PMU data.}
+\npar{\hspace*{4\fontdimen2\font}For each environment, let ${\mathit{c}}_{\mathit{i},\mathit{E}}=\mathit{CPI}*{\mathit{Ratio}}_{\mathit{i},\mathit{E}}$ be the cycles per instruction of TMA node $\mathit{i}$ in the sampled window, and define the measured and the predicted CPI ratio between BM and VM:}
+\dmath{{\mathit{k}}_{\mathit{meas}}=\frac{{\mathit{CPI}}_{\mathit{BM}}}{{\mathit{CPI}}_{\mathit{VM}}},\quad {\mathit{k}}_{\mathit{pred}}=\frac{\mathit{r}*\left( 1+\alpha  \right)}{\beta }=\mathit{k}*\left( 1+\alpha  \right),\quad \mathit{k}=\frac{\mathit{r}}{\beta }}
+\npar{\hspace*{4\fontdimen2\font}Since ${\mathit{Ratio}}_{\mathit{i},\mathit{VM}}-{\mathit{k}}_{\mathit{meas}}*{\mathit{Ratio}}_{\mathit{i},\mathit{BM}}=\frac{{\mathit{c}}_{\mathit{i},\mathit{VM}}-{\mathit{c}}_{\mathit{i},\mathit{BM}}}{{\mathit{CPI}}_{\mathit{VM}}}$, the gap of each TMA node can be decomposed exactly as:}
+\dmath{{\mathit{gap}}_{\mathit{i},\mathit{ratio\_TMA}}={\mathit{d}}_{\mathit{i}}+\mathit{k}*\alpha *{\mathit{Ratio}}_{\mathit{i},\mathit{BM}}+\left( {\mathit{k}}_{\mathit{meas}}-{\mathit{k}}_{\mathit{pred}} \right)*{\mathit{Ratio}}_{\mathit{i},\mathit{BM}}}
+\dmath{{\mathit{d}}_{\mathit{i}}=\frac{{\mathit{c}}_{\mathit{i},\mathit{VM}}-{\mathit{c}}_{\mathit{i},\mathit{BM}}}{{\mathit{CPI}}_{\mathit{VM}}}}
+\npar{\hspace*{4\fontdimen2\font}Here, ${\mathit{d}}_{\mathit{i}}$ compares the cycles per instruction of node $\mathit{i}$ between the two sampled windows directly, without using the score; $\mathit{k}*\alpha *{\mathit{Ratio}}_{\mathit{i},\mathit{BM}}$ is the cost of the instructions of hypervisor; and $\left( {\mathit{k}}_{\mathit{meas}}-{\mathit{k}}_{\mathit{pred}} \right)*{\mathit{Ratio}}_{\mathit{i},\mathit{BM}}$ (the window term) is the inconsistency between the score and the sampled windows.}
+\npar{\hspace*{4\fontdimen2\font}If the sampled windows represent the scored runs, ${\mathit{k}}_{\mathit{meas}}\approx {\mathit{k}}_{\mathit{pred}}$, the window term is close to 0, and the two views (${\mathit{gap}}_{\mathit{i},\mathit{ratio\_TMA}}$ and ${\mathit{d}}_{\mathit{i}}$) agree up to the hypervisor term. Otherwise, the VM effect of each node is uncertain by about its window term: only the conclusions that hold in both views are reliable, and cases whose windows are consistent with each other (e.g., one VM configuration against another) can be compared directly.}
+\npar{\hspace*{4\fontdimen2\font}Two further checks help to locate an inconsistent window: (1) if every window covers its whole run, the busy time of each window (window length * utilization) multiplied by $\mathit{r}$ is the same for all cases; (2) for the same binary, the instruction mix (branches, loads and stores per instruction) is the same in all cases, so a CPI mismatch with an unchanged mix points to windows covering different phases of the runs rather than to extra instructions.}
+\emptypar
+\numpara{18.00pt}{18.00pt}{\textbf{4.}}{\textbf{Experimental Comparison}}
+\npar{\hspace*{9.75pt}In the test of 520.omnetpp\_r ({\fontsize{11pt}{15.54pt}\selectfont 4k page }{\fontsize{11pt}{15.54pt}\selectfont VM / normal VM / 2M page VM}), CPU utilization remained unchanged, and since adjustments to the memory page size didn’t change the behavior of vmexit (mainly about timer related exit), so that the instruction expansion of virtualization can be considered virtually unchanged. So we can get\textit{\textbf{ }}$\symbfit{\alpha}=1.15\%$ and $\symbfit{\beta}=100\%$. Note that $\alpha $ cancels out in the final breakdown formula (see section 3.(3)), so it is listed in the following table only for reference.}
+\npar{\hspace*{9.75pt}Based on the conclusions in sections 3.(3) and 3.(4), we can break down the score gap into TMA metric:}
+\emptypar
+\par\begingroup\tablefont\fontsize{11pt}{13.42pt}\selectfont\setlength{\tabcolsep}{5.40pt}
+\noindent\hspace*{26.75pt}\begin{tabular}{|b{156.20pt}|b{72.70pt}|b{80.70pt}|b{82.95pt}|@{}b{0pt}@{}}
+\hline
+\centering\arraybackslash{} & \centering\arraybackslash{}4k page vm & \centering\arraybackslash{}normal vm & \centering\arraybackslash{}2M page vm & \rule[-0.00pt]{0pt}{12.25pt} \\ \hline
+\centering\arraybackslash{}score gap & \centering\arraybackslash{}16.15\% & \centering\arraybackslash{}6.18\% & \centering\arraybackslash{}5.54\% & \rule[-0.00pt]{0pt}{12.25pt} \\ \hline
+\centering\arraybackslash{}r & \centering\arraybackslash{}83.85\% & \centering\arraybackslash{}93.82\% & \centering\arraybackslash{}94.46\% & \rule[-0.00pt]{0pt}{12.25pt} \\ \hline
+\centering\arraybackslash{}\ensuremath{\upalpha} & \centering\arraybackslash{}1.15\% & \centering\arraybackslash{}1.15\% & \centering\arraybackslash{}1.15\% & \rule[-0.00pt]{0pt}{12.25pt} \\ \hline
+\centering\arraybackslash{}\ensuremath{\upbeta} & \centering\arraybackslash{}100.00\% & \centering\arraybackslash{}100.00\% & \centering\arraybackslash{}100.00\% & \rule[-0.00pt]{0pt}{12.25pt} \\ \hline
+\centering\arraybackslash{}virt gap & \centering\arraybackslash{}0.00\% & \centering\arraybackslash{}0.00\% & \centering\arraybackslash{}0.00\% & \rule[-0.00pt]{0pt}{12.25pt} \\ \hline
+\centering\arraybackslash{}TMA gap & \centering\arraybackslash{}16.13\% & \centering\arraybackslash{}6.17\% & \centering\arraybackslash{}5.53\% & \rule[-0.00pt]{0pt}{12.25pt} \\ \hline
+\cellcolor[HTML]{F8CBAD}\centering\arraybackslash{}metric\_\allowbreak{}TMA\_\allowbreak{}Frontend\_\allowbreak{}Bound gap & \cellcolor[HTML]{F8CBAD}\centering\arraybackslash{}5.83\% & \cellcolor[HTML]{F8CBAD}\centering\arraybackslash{}4.49\% & \cellcolor[HTML]{F8CBAD}\centering\arraybackslash{}4.33\% & \rule[-0.00pt]{0pt}{12.25pt} \\ \hline
+\centering\arraybackslash{}metric\_\allowbreak{}TMA\_\allowbreak{}Bad\_\allowbreak{}Speculation gap & \centering\arraybackslash{}0.53\% & \centering\arraybackslash{}0.44\% & \centering\arraybackslash{}0.43\% & \rule[-0.00pt]{0pt}{12.25pt} \\ \hline
+\cellcolor[HTML]{F8CBAD}\centering\arraybackslash{}metric\_\allowbreak{}TMA\_\allowbreak{}Backend\_\allowbreak{}Bound gap & \cellcolor[HTML]{F8CBAD}\centering\arraybackslash{}8.80\% & \cellcolor[HTML]{F8CBAD}\centering\arraybackslash{}0.15\% & \cellcolor[HTML]{F8CBAD}\centering\arraybackslash{}-0.27\% & \rule[-0.00pt]{0pt}{12.25pt} \\ \hline
+\centering\arraybackslash{}metric\_\allowbreak{}TMA\_\allowbreak{}Retiring gap & \centering\arraybackslash{}0.97\% & \centering\arraybackslash{}1.09\% & \centering\arraybackslash{}1.04\% & \rule[-0.00pt]{0pt}{12.25pt} \\ \hline
+\end{tabular}\par\endgroup\par
+\npar{\hspace*{9.75pt}Note: TMA gap is the sum of the four top-level gaps. Its tiny residual against the score gap (no more than 0.02\%) comes from the rounding of the TMA ratios in the table of section 1 (e.g., the sum of the four top-level ratios of BM is 100.01\%).}
+\emptypar
+\npar{\hspace*{9.60pt}From the above breakdown of the TMA metric gap, we can see that the performance gain for the 2M-page configuration is largely attributable to the backend (the Backend\_Bound gap drops from 8.80\% for 4k page VM to -0.27\% for 2M page VM), which is consistent with actual observations. Furthermore, regarding the remaining gap (5.54\% for 2M page VM), a breakdown reveals that the primary bottleneck lies in the frontend (4.33\%). Note that the Backend\_Bound gaps of normal VM and 2M page VM (0.15\% and -0.27\%) are small enough to be comparable with the measurement noise: ${\mathit{gap}}_{\mathit{i},\mathit{ratio\_TMA}}$ is sensitive to $\mathit{r}$ with a factor of ${\mathit{Ratio}}_{\mathit{i},\mathit{BM}}$, e.g., a 0.5\% run-to-run variation of the score would shift the Backend\_Bound gap (68.28\% for BM) by about 0.34\%. So, it is more appropriate to conclude that the backend of these two configurations is roughly on par with bare metal. The consistency check below further shows that the sign of the Backend\_Bound gap of 2M page VM against BM cannot be resolved with the current BM data.}
+\npar{\hspace*{9.60pt}Furthermore, we can break down the gap into TMA sub-nodes, like:}
+\par\begingroup\tablefont\fontsize{11pt}{13.42pt}\selectfont\setlength{\tabcolsep}{5.40pt}\LTleft=0pt plus 1fill \LTright=0pt plus 1fill\setlength{\LTpre}{0pt}\setlength{\LTpost}{0pt}
+\begin{longtable}{|b{204.20pt}|b{89.20pt}|b{89.20pt}|@{}b{0pt}@{}}
+\hline
+\centering\arraybackslash{} & \centering\arraybackslash{}2M VM break down (weighted) & \centering\arraybackslash{}2M VM break down (unweighted) & \rule[-0.00pt]{0pt}{11.65pt} \\ \hline \endfirsthead
+\cellcolor[HTML]{F8CBAD}\raggedright\arraybackslash{}metric\_\allowbreak{}TMA\_\allowbreak{}Frontend\_\allowbreak{}Bound(\%) & \cellcolor[HTML]{F8CBAD}\centering\arraybackslash{}4.3 & \cellcolor[HTML]{F8CBAD}\centering\arraybackslash{}4.3 & \rule[-0.00pt]{0pt}{11.65pt} \\ \hline
+\raggedright\arraybackslash{}metric\_\allowbreak{}TMA\_\allowbreak{}..Fetch\_\allowbreak{}Latency(\%) & \centering\arraybackslash{}3.9 & \centering\arraybackslash{}3.9 & \rule[-0.00pt]{0pt}{11.65pt} \\ \hline
+\cellcolor[HTML]{F8CBAD}\raggedright\arraybackslash{}metric\_\allowbreak{}TMA\_\allowbreak{}....ICache\_\allowbreak{}Misses(\%) & \cellcolor[HTML]{F8CBAD}\centering\arraybackslash{}1.9 & \cellcolor[HTML]{F8CBAD}\centering\arraybackslash{}2.1 & \rule[-0.00pt]{0pt}{11.65pt} \\ \hline
+\raggedright\arraybackslash{}metric\_\allowbreak{}TMA\_\allowbreak{}......Code\_\allowbreak{}L2\_\allowbreak{}Hit(\%) & \centering\arraybackslash{}– & \centering\arraybackslash{}0.0 & \rule[-0.00pt]{0pt}{11.65pt} \\ \hline
+\raggedright\arraybackslash{}metric\_\allowbreak{}TMA\_\allowbreak{}......Code\_\allowbreak{}L2\_\allowbreak{}Miss(\%) & \centering\arraybackslash{}– & \centering\arraybackslash{}0.6 & \rule[-0.00pt]{0pt}{11.65pt} \\ \hline
+\raggedright\arraybackslash{}metric\_\allowbreak{}TMA\_\allowbreak{}....ITLB\_\allowbreak{}Misses(\%) & \centering\arraybackslash{}0.7 & \centering\arraybackslash{}0.9 & \rule[-0.00pt]{0pt}{11.65pt} \\ \hline
+\raggedright\arraybackslash{}metric\_\allowbreak{}TMA\_\allowbreak{}......Code\_\allowbreak{}STLB\_\allowbreak{}Hit(\%) & \centering\arraybackslash{}– & \centering\arraybackslash{}0.0 & \rule[-0.00pt]{0pt}{11.65pt} \\ \hline
+\raggedright\arraybackslash{}metric\_\allowbreak{}TMA\_\allowbreak{}......Code\_\allowbreak{}STLB\_\allowbreak{}Miss(\%) & \centering\arraybackslash{}– & \centering\arraybackslash{}0.0 & \rule[-0.00pt]{0pt}{11.65pt} \\ \hline
+\raggedright\arraybackslash{}metric\_\allowbreak{}TMA\_\allowbreak{}........Code\_\allowbreak{}STLB\_\allowbreak{}Miss\_\allowbreak{}4K(\%) & \centering\arraybackslash{}– & \centering\arraybackslash{}0.1 & \rule[-0.00pt]{0pt}{11.65pt} \\ \hline
+\raggedright\arraybackslash{}metric\_\allowbreak{}TMA\_\allowbreak{}........Code\_\allowbreak{}STLB\_\allowbreak{}Miss\_\allowbreak{}2M(\%) & \centering\arraybackslash{}– & \centering\arraybackslash{}0.0 & \rule[-0.00pt]{0pt}{11.65pt} \\ \hline
+\cellcolor[HTML]{F8CBAD}\raggedright\arraybackslash{}metric\_\allowbreak{}TMA\_\allowbreak{}....Branch\_\allowbreak{}Resteers(\%) & \cellcolor[HTML]{F8CBAD}\centering\arraybackslash{}1.6 & \cellcolor[HTML]{F8CBAD}\centering\arraybackslash{}2.0 & \rule[-0.00pt]{0pt}{11.65pt} \\ \hline
+\raggedright\arraybackslash{}metric\_\allowbreak{}TMA\_\allowbreak{}......Mispredicts\_\allowbreak{}Resteers(\%) & \centering\arraybackslash{}0.2 & \centering\arraybackslash{}0.4 & \rule[-0.00pt]{0pt}{11.65pt} \\ \hline
+\raggedright\arraybackslash{}metric\_\allowbreak{}TMA\_\allowbreak{}......Clears\_\allowbreak{}Resteers(\%) & \centering\arraybackslash{}0.0 & \centering\arraybackslash{}0.0 & \rule[-0.00pt]{0pt}{11.65pt} \\ \hline
+\raggedright\arraybackslash{}metric\_\allowbreak{}TMA\_\allowbreak{}......Unknown\_\allowbreak{}Branches(\%) & \centering\arraybackslash{}1.4 & \centering\arraybackslash{}1.6 & \rule[-0.00pt]{0pt}{11.65pt} \\ \hline
+\raggedright\arraybackslash{}metric\_\allowbreak{}TMA\_\allowbreak{}....MS\_\allowbreak{}Switches(\%) & \centering\arraybackslash{}0.1 & \centering\arraybackslash{}0.1 & \rule[-0.00pt]{0pt}{11.65pt} \\ \hline
+\raggedright\arraybackslash{}metric\_\allowbreak{}TMA\_\allowbreak{}....LCP(\%) & \centering\arraybackslash{}0.0 & \centering\arraybackslash{}0.0 & \rule[-0.00pt]{0pt}{11.65pt} \\ \hline
+\raggedright\arraybackslash{}metric\_\allowbreak{}TMA\_\allowbreak{}....DSB\_\allowbreak{}Switches(\%) & \centering\arraybackslash{}-0.4 & \centering\arraybackslash{}0.0 & \rule[-0.00pt]{0pt}{11.65pt} \\ \hline
+\raggedright\arraybackslash{}metric\_\allowbreak{}TMA\_\allowbreak{}..Fetch\_\allowbreak{}Bandwidth(\%) & \centering\arraybackslash{}0.4 & \centering\arraybackslash{}0.4 & \rule[-0.00pt]{0pt}{11.65pt} \\ \hline
+\raggedright\arraybackslash{}metric\_\allowbreak{}TMA\_\allowbreak{}....MITE(\%) & \centering\arraybackslash{}0.1 & \centering\arraybackslash{}0.1 & \rule[-0.00pt]{0pt}{11.65pt} \\ \hline
+\raggedright\arraybackslash{}metric\_\allowbreak{}TMA\_\allowbreak{}......Decoder0\_\allowbreak{}Alone(\%) & \centering\arraybackslash{}– & \centering\arraybackslash{}0.0 & \rule[-0.00pt]{0pt}{11.65pt} \\ \hline
+\raggedright\arraybackslash{}metric\_\allowbreak{}TMA\_\allowbreak{}....DSB(\%) & \centering\arraybackslash{}0.3 & \centering\arraybackslash{}0.4 & \rule[-0.00pt]{0pt}{11.65pt} \\ \hline
+\raggedright\arraybackslash{}metric\_\allowbreak{}TMA\_\allowbreak{}....MS(\%) & \centering\arraybackslash{}0.1 & \centering\arraybackslash{}0.1 & \rule[-0.00pt]{0pt}{11.65pt} \\ \hline
+\end{longtable}
+\endgroup\par
+\npar{\hspace*{9.60pt}Here, the values are calculated from the raw EMON summary of the same tests (the BM and 2M VM cases, TMA version 5.1) with $\mathit{r}=94.46\%$ and $\beta =100\%$. The weighted gap is calculated with the weight factors of each environment (see section 3.(4)), so the weighted gaps of the sub-nodes add up to that of their parent node; the unweighted gap is ${\mathit{sub\_Ratio}}_{\mathit{i},\mathit{j},\mathit{VM}}-\frac{\mathit{r}}{\beta }*{\mathit{sub\_Ratio}}_{\mathit{i},\mathit{j},\mathit{BM}}$, which can only be used to rank the sub-nodes under the same parent node.}
+\npar{\hspace*{9.60pt}–: The weighted gap is not available when the sub-nodes cannot be weighted proportionally: Code\_L2\_Hit and Code\_STLB\_Hit are 0 in all cases, so the sub-nodes of ICache\_Misses and ITLB\_Misses do not add up to their parents (e.g., 0.68\% vs. 2.36\% for ICache\_Misses of 2M VM), and MITE has only one sub-node (Decoder0\_Alone). Besides, Code\_STLB\_Miss\_4K is even larger than its parent Code\_STLB\_Miss. These sub-nodes should be further checked against the raw event counts.}
+\npar{\hspace*{9.60pt}Note: the breakdown is an accounting identity of cycles (slots) rather than a causal model. Since there are inter-relationships among the TMA categories (e.g., relieving the frontend bound may expose more backend bound), eliminating the gap of one category does not necessarily recover the same amount of performance, which should be verified by experiments.}
+\emptypar
+\npar{\hspace*{9.75pt}\textbf{Consistency check of the 520.omnetpp\_r data}}
+\npar{\hspace*{9.75pt}Applying the consistency check of section 3.(5) to the same tests (CPI, sampling time and utilization are taken from the EMON summary of these tests, which does not include normal VM) gives the following decomposition, in points of the score gap:}
+\par\begingroup\tablefont\fontsize{11pt}{13.42pt}\selectfont\setlength{\tabcolsep}{5.40pt}
+\noindent\hspace*{5.00pt}\begin{tabular}{|b{139.20pt}|b{144.20pt}|b{144.20pt}|@{}b{0pt}@{}}
+\hline
+\centering\arraybackslash{} & \centering\arraybackslash{}4k page vm: gap = d\_\allowbreak{}i + \ensuremath{\upalpha} term + window term & \centering\arraybackslash{}2M page vm: gap = d\_\allowbreak{}i + \ensuremath{\upalpha} term + window term & \rule[-0.00pt]{0pt}{12.25pt} \\ \hline
+\centering\arraybackslash{}k = r/\ensuremath{\upbeta} & \centering\arraybackslash{}0.8385 & \centering\arraybackslash{}0.9446 & \rule[-0.00pt]{0pt}{12.25pt} \\ \hline
+\centering\arraybackslash{}k\_\allowbreak{}meas = CPI\_\allowbreak{}BM / CPI\_\allowbreak{}VM & \centering\arraybackslash{}0.9278 & \centering\arraybackslash{}1.0409 & \rule[-0.00pt]{0pt}{12.25pt} \\ \hline
+\centering\arraybackslash{}k\_\allowbreak{}pred = k*(1+\ensuremath{\upalpha}) & \centering\arraybackslash{}0.8481 & \centering\arraybackslash{}0.9555 & \rule[-0.00pt]{0pt}{12.25pt} \\ \hline
+\centering\arraybackslash{}k\_\allowbreak{}meas - k\_\allowbreak{}pred & \centering\arraybackslash{}+0.0797 & \centering\arraybackslash{}+0.0854 & \rule[-0.00pt]{0pt}{12.25pt} \\ \hline
+\cellcolor[HTML]{F8CBAD}\centering\arraybackslash{}metric\_\allowbreak{}TMA\_\allowbreak{}Frontend\_\allowbreak{}Bound & \cellcolor[HTML]{F8CBAD}\centering\arraybackslash{}+5.83 = +4.71 + 0.12 + 1.00 & \cellcolor[HTML]{F8CBAD}\centering\arraybackslash{}+4.33 = +3.12 + 0.14 + 1.08 & \rule[-0.00pt]{0pt}{12.25pt} \\ \hline
+\centering\arraybackslash{}metric\_\allowbreak{}TMA\_\allowbreak{}Bad\_\allowbreak{}Speculation & \centering\arraybackslash{}+0.53 = -0.21 + 0.08 + 0.66 & \centering\arraybackslash{}+0.43 = -0.37 + 0.09 + 0.71 & \rule[-0.00pt]{0pt}{12.25pt} \\ \hline
+\cellcolor[HTML]{F8CBAD}\centering\arraybackslash{}metric\_\allowbreak{}TMA\_\allowbreak{}Backend\_\allowbreak{}Bound & \cellcolor[HTML]{F8CBAD}\centering\arraybackslash{}+8.80 = +2.70 + 0.66 + 5.44 & \cellcolor[HTML]{F8CBAD}\centering\arraybackslash{}-0.27 = -6.84 + 0.74 + 5.83 & \rule[-0.00pt]{0pt}{12.25pt} \\ \hline
+\centering\arraybackslash{}metric\_\allowbreak{}TMA\_\allowbreak{}Retiring & \centering\arraybackslash{}+0.97 = +0.00 + 0.10 + 0.87 & \centering\arraybackslash{}+1.04 = +0.00 + 0.12 + 0.93 & \rule[-0.00pt]{0pt}{12.25pt} \\ \hline
+\end{tabular}\par\endgroup\par
+\npar{\hspace*{9.75pt}Note: the \ensuremath{\upalpha} term uses \ensuremath{\upalpha} = 1.15\% for both cases, as above; \ensuremath{\upbeta} = 100\%.}
+\emptypar
+\npar{\hspace*{9.75pt}The measured CPI ratio is larger than the predicted one by about 0.08 in both VM cases, i.e., the EMON data implies about 10\% more instructions per unit of work in the VM cases than the measured \ensuremath{\upalpha}. Since the instruction mix is the same in all cases (branches, loads and stores per instruction within 1.3\%), this is not caused by extra instructions. Instead, the sampled windows cover different parts of the runs: the BM window is 232.7 s long at 100\% utilization, while the busy time of the VM windows (979.3 s for 4k page VM and 871.3 s for 2M page VM) multiplied by r gives the same BM run time of about 822 s in both cases. So the VM windows cover their whole runs, but the BM window covers only about 28\% of its run, and its CPI (2.94) is about 9\% higher than the run average implied by both VM cases (2.69 and 2.70). This is the source of the large window terms above.}
+\npar{\hspace*{9.75pt}Since the windows of 4k page VM and 2M page VM are consistent with each other, the two VM configurations can be compared directly, with 2M page VM as the baseline (r = 83.85\% / 94.46\%):}
+\par\begingroup\tablefont\fontsize{11pt}{13.42pt}\selectfont\setlength{\tabcolsep}{5.40pt}
+\noindent\hspace*{26.75pt}\begin{tabular}{|b{191.20pt}|b{139.20pt}|@{}b{0pt}@{}}
+\hline
+\centering\arraybackslash{} & \centering\arraybackslash{}4k page vm vs 2M page vm & \rule[-0.00pt]{0pt}{12.25pt} \\ \hline
+\centering\arraybackslash{}score gap & \centering\arraybackslash{}11.23\% & \rule[-0.00pt]{0pt}{12.25pt} \\ \hline
+\centering\arraybackslash{}k\_\allowbreak{}meas - k\_\allowbreak{}pred & \centering\arraybackslash{}+0.0037 & \rule[-0.00pt]{0pt}{12.25pt} \\ \hline
+\cellcolor[HTML]{F8CBAD}\centering\arraybackslash{}metric\_\allowbreak{}TMA\_\allowbreak{}Frontend\_\allowbreak{}Bound gap (d\_\allowbreak{}i) & \cellcolor[HTML]{F8CBAD}\centering\arraybackslash{}+1.99\% (+1.93\%) & \rule[-0.00pt]{0pt}{12.25pt} \\ \hline
+\centering\arraybackslash{}metric\_\allowbreak{}TMA\_\allowbreak{}Bad\_\allowbreak{}Speculation gap (d\_\allowbreak{}i) & \centering\arraybackslash{}+0.15\% (+0.12\%) & \rule[-0.00pt]{0pt}{12.25pt} \\ \hline
+\cellcolor[HTML]{F8CBAD}\centering\arraybackslash{}metric\_\allowbreak{}TMA\_\allowbreak{}Backend\_\allowbreak{}Bound gap (d\_\allowbreak{}i) & \cellcolor[HTML]{F8CBAD}\centering\arraybackslash{}+9.03\% (+8.80\%) & \rule[-0.00pt]{0pt}{12.25pt} \\ \hline
+\centering\arraybackslash{}metric\_\allowbreak{}TMA\_\allowbreak{}Retiring gap (d\_\allowbreak{}i) & \centering\arraybackslash{}+0.05\% (+0.01\%) & \rule[-0.00pt]{0pt}{12.25pt} \\ \hline
+\end{tabular}\par\endgroup\par
+\emptypar
+\npar{\hspace*{9.75pt}Thereby, the conclusions that hold in both views are: (1) the frontend is a VM cost in every configuration (+4.33 to +5.83 points score-based, +3.12 to +4.71 points in d\_i), and it carries most of the remaining gap of 2M page VM; (2) the gain of 2M page VM over 4k page VM comes from the backend (+9.03 of the 11.23 points, +8.80 in d\_i, with a window term of only +0.24). On the other hand, the Retiring and Bad\_Speculation gaps against BM are produced by the BM window rather than by virtualization (their d\_i is about 0 or negative), and the sign of the Backend\_Bound gap of 2M page VM against BM cannot be resolved with the current BM data (-0.27 score-based, -6.84 in d\_i). A BM EMON that covers the whole run, or the same sample range as the VM cases, is needed to settle them.}
+\npar{\hspace*{9.75pt}Note: the score file of these EMON runs gives r = 94.66\% (gap 5.35\%) for 2M page VM instead of 94.46\%; with it, the values above change by no more than 0.15 points.}
+\emptypar
+\npar{\hspace*{9.75pt}In practice, when utilizations of VM and BM cases are very close, the calculations can be simplified (with $\beta =100\%$) as:}
+\dmath{\mathit{ga}{\mathit{p}}_{\mathit{ratio}}=\sum\limits_{\mathit{i}\in \mathit{TMA}}{\left( \mathit{Rati}{\mathit{o}}_{\mathit{i},\mathit{VM}}-\mathit{r}*\mathit{Rati}{\mathit{o}}_{\mathit{i},\mathit{BM}} \right)}}
+\npar{\hspace*{4\fontdimen2\font}Here,}
+\dmath{\mathit{r}=\frac{\mathit{Scor}{\mathit{e}}_{\mathit{VM}}}{\mathit{Scor}{\mathit{e}}_{\mathit{BM}}}.}
+\emptypar
+\npar{\textbf{Reference}}
+\npar{[1]: A Top-Down Method for Performance Analysis and Counters Architecture}
+\npar{[2]: SPEC CPU 2017 overview: https://www.spec.org/cpu2017/Docs/overview.html}
+\end{document}
